@@ -5,3 +5,6 @@ test:
 	@for src in $(srcs); do \
 		$(python) $$src; \
 	done
+
+sample:
+	$(python) _sample.py

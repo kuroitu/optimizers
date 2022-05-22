@@ -1,43 +1,47 @@
-from enum import IntEnum, auto
-from dataclasses import dataclass, InitVar
-
 import numpy as np
-from numpy import ndarray
 
-try:
-    from ._base import BaseOpt
-except ImportError:
-    # For doctest
-    from main.dl.opt import BaseOpt
+from _base import BaseOpt
 
 
-class _keys(IntEnum):
-    s = 0
-    m = auto()
-    v = auto()
-    zeta = auto()
-
-
-@dataclass
 class SMORMS3(BaseOpt):
     """SMORMS3 optimizer class.
+
+    Attributes:
+        eta (Callable): Learning rate.
+                        If float comming, make lambda function
+                        which return the value.
 
     Examples:
     >>> import numpy as np
     >>> obj = SMORMS3()
-    >>> print(obj)
-    SMORMS3(eta=0.001)
-    >>> obj.update(np.array([-0.5, 1]))
+    >>> obj.update(grad=np.array([-0.5, 1])) # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    RuntimeError: <<Error sentence>>
+    >>> obj.build()
+    >>> obj.update(grad=np.array([-0.5, 1]))
     array([ 0.00141421, -0.00141421])
+    >>> obj = SMORMS3(eta=lambda t=1: 1e-2 * 0.5**(t-1))
+    >>> obj.build()
+    >>> for i in range(1, 11):
+    ...     print(f"t={i:2d}", obj.update(grad=np.array([-0.5, 1]), t=i))
+    t= 1 [ 0.01414214 -0.01414214]
+    t= 2 [ 0.00547723 -0.00547723]
+    t= 3 [ 0.00257248 -0.00257248]
+    t= 4 [ 0.00126515 -0.00126515]
+    t= 5 [ 0.00062862 -0.00062862]
+    t= 6 [ 0.00031339 -0.00031339]
+    t= 7 [ 0.00015647 -0.00015647]
+    t= 8 [ 7.81799217e-05 -7.81799217e-05]
+    t= 9 [ 3.90762038e-05 -3.90762038e-05]
+    t=10 [ 1.95346726e-05 -1.95346726e-05]
     """
-    kind: InitVar[int] = 4
-    eta: float = 1e-3
 
-    def __post_init__(self, *args, **kwds):
-        super().__post_init__(*args, **kwds)
-        self.previous[_keys.s] = 1
+    def __init__(self, *, eta=1e-3, **kwds):
+        super().__init__(**kwds)
+        self._set_param2callable("eta", eta)
 
-    def update(self, grad, *args, **kwds):
+    def __update(self, *, grad=None, **kwds):
         """Update calculation.
 
         Args:
@@ -46,45 +50,24 @@ class SMORMS3(BaseOpt):
         Returns:
             delta (ndarray): Update delta.
         """
+        etakwds = self._get_func_kwds(self.eta, kwds)
+
         rho = 1/(1+self._s)
         self._s += 1 - self._zeta*self._s
         self._m += (1-rho)*(grad - self._m)
         self._v += (1-rho)*(grad*grad - self._v)
         self._zeta = (self._m*self._m/self._v)
-        delta = -grad*np.minimum(self.eta, self._zeta)/np.sqrt(self._v)
-        return delta
+        return -grad*np.minimum(self.eta(**etakwds), self._zeta) \
+                    /np.sqrt(self._v)
 
-    @property
-    def _s(self):
-        return self.previous[_keys.s]
-
-    @_s.setter
-    def _s(self, value):
-        self.previous[_keys.s] = value
-
-    @property
-    def _m(self):
-        return self.previous[_keys.m]
-
-    @_m.setter
-    def _m(self, value):
-        self.previous[_keys.m] = value
-
-    @property
-    def _v(self):
-        return self.previous[_keys.v]
-
-    @_v.setter
-    def _v(self, value):
-        self.previous[_keys.v] = value
-
-    @property
-    def _zeta(self):
-        return self.previous[_keys.zeta]
-
-    @_zeta.setter
-    def _zeta(self, value):
-        self.previous[_keys.zeta] = value
+    def build(self, *, _s=1, _m=1e-8, _v=1e-8, _zeta=1e-8, **kwds):
+        """Build optimizer."""
+        self._s = _s
+        self._m = _m
+        self._v = _v
+        self._zeta = _zeta
+        self.update = self.__update
+        self._is_built = True
 
 
 if __name__ == "__main__":

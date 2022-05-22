@@ -1,27 +1,53 @@
-from dataclasses import dataclass, InitVar, field
-
-import numpy as np
-from numpy import ndarray
+import inspect
 
 
-@dataclass
 class BaseOpt():
-    """Base class for optimizers.
+    """Base class for optimizers."""
 
-    Args:
-        n (int): Number of parameters to update.
-        eps (float): Tiny values to avoid division by zero.
-    """
-    kind: InitVar[int] = 0
-    n: InitVar[int] = 2
-    eps: InitVar[float] = 1e-8
-    previous: ndarray = field(init=False, repr=False)
+    def __init__(self, *args, **kwds):
+        self._is_built = False
 
-    def __post_init__(self, kind, n, eps, *args, **kwds):
-        if kind:
-            self.previous = np.full((kind, n), eps)
+    def __repr__(self):
+        reprstr = self.__class__.__name__ + "(\n\t" \
+                + "\n\t".join([argname + "=" + str(argvalue)
+                               for argname, argvalue
+                               in self.__dict__.items()]) \
+                + "\n)"
+        return reprstr
+
+    __str__ = __repr__
+
+    def _get_func_param(self, func):
+        return inspect.signature(func).parameters
+
+    def _get_func_kwds(self, func, kwds):
+        """Get keyword arguments for func.
+
+        Args:
+            func (Callable): Target to extract arguments.
+            kwds (Dict): Dictionary including func's arguments.
+        """
+        func_kwds = {}
+        params = self._get_func_param(func)
+        for param in params.values():
+            if param.name in kwds:
+                func_kwds[param.name] = kwds[param.name]
+        return func_kwds
+
+    def _set_param2callable(self, name, param):
+        if callable(param):
+            setattr(self, name, param)
         else:
-            self.previous = None
+            setattr(self, name, lambda *pargs, **pkwds: param)
 
     def update(self, *args, **kwds):
-        raise NotImplementedError("'update' method must be implemented.")
+        if self._is_built:
+            raise NotImplementedError("'update' method must be implemented.")
+        else:
+            raise RuntimeError(
+                    "Not built. "
+                    "You must execute 'build' method "
+                    "before executing 'update' method.")
+
+    def build(self, *args, **kwds):
+        raise NotImplementedError("'build' method must be implemented.")

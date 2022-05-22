@@ -6,85 +6,98 @@ from numpy import ndarray
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
 
-try:
-    from ._interface import get_opt
-except ImportError:
-    # For doctest
-    from main.dl.opt import get_opt
+from _sgd import SGD
+from _msgd import MSGD
+from _nag import NAG
+from _adagrad import AdaGrad
+from _rmsprop import RMSprop
+from _adadelta import AdaDelta
+from _adam import Adam
+from _rmsprop_graves import RMSpropGraves
+from _smorms3 import SMORMS3
+from _adamax import AdaMax
+from _nadam import Nadam
+from _eve import Eve
+from _santa_e import SantaE
+from _santa_sss import SantaSSS
+from _amsgrad import AMSGrad
+from _adabound import AdaBound
+from _amsbound import AMSBound
+from _adabelief import AdaBelief
+from _sam import SAM
 
 
 @dataclass
 class _target():
     params: Union[ndarray, int] = 0
 
-    def forward(self, x, *args, **kwds):
+    def forward(self, *, x=None, **kwds):
         """
-        Maxima = -0.257043 (when x = -0.0383009)
-        Minimal = -2.36643 (when x = 2.22366)
-                = -2.93536 (when x = -2.93536)
+        Maxima  = -0.256097 (when x = -0.0704646)
+        Minimal = -0.915094 (when x =  1.57421)
+                = -3.85712  (when x = -2.25375)
         """
-        if np.any(self.params!=x):
+        if x is None:
             x = self.params
-        return -np.exp(-((x+4)*(x+1)*(x-1)*(x-3)/14 + 0.5))
+        return -np.exp(-((x+3)*(x+1)*(x-1)*(x-2)/7 + 0.5))
 
-
-    def backward(self, x, *args, **kwds):
+    def backward(self, *, x=None, **kwds):
         """
-        https://www.wolframalpha.com/input/?i=-exp%28-%28%28x+%2B+4%29%28x+%2B+1%29%28x+%E2%88%92+1%29%28x+%E2%88%92+3%29%2F14+%2B+0.5%29%29&lang=ja
+        https://www.wolframalpha.com/input?i=d%2Fdx+-exp%28-%28%28x%2B3%29*%28x%2B1%29*%28x-1%29*%28x-2%29%2F7%2B0.5%29%29&lang=ja
         """
-        if np.any(self.params!=x):
+        if x is None:
             x = self.params
-        return (0.173294*np.exp(-((x+4)*(x+1)*(x-1)*(x-3)/14))
-                        *(x**3 + 0.75 * x**2 - 6.5*x - 0.25))
+        return (0.346589*np.exp(-((x-2)*(x-1)*(x+1)*(x+3)/7))
+                        *(x-1.57421)*(x+0.0704646)*(x+2.25375))
 
 
 def opt_plot():
     objective = _target()
 
-    start_x = objective.params = 3.5
-    start_y = objective.forward(start_x)
+    start_x = objective.params = np.array([2.5])
+    start_y = objective.forward(x=start_x)
 
-    x_range = objective.params = np.arange(-5, 5, 1e-2)
-    y_range = objective.forward(x_range)
+    x_range = objective.params = np.arange(-3, 3, 1e-2)
+    y_range = objective.forward(x=x_range)
 
-    exact_x = objective.params = -2.93536
-    exact_y = objective.forward(exact_x)
+    exact_x = objective.params = np.array([-2.25375])
+    exact_y = objective.forward(x=exact_x)
 
-    semi_exact_x = objective.params = 2.22366
-    semi_exact_y = objective.forward(semi_exact_x)
+    semi_exact_x = objective.params = np.array([1.57421])
+    semi_exact_y = objective.forward(x=semi_exact_x)
 
-    epoch = 256
-    frame = 64
+    epoch = 2**8
+    frame = 2**6
     fps = 10
+    seed = 2
 
-    np.random.seed(seed=2)
-    opt_dict = {"SGD": get_opt("sgd", n=1, eta=0.1),
-                "MSGD": get_opt("msgd", n=1, eta=0.25),
-                "NAG": get_opt("nag", n=1, parent=objective, eta=0.1),
-                "AdaGrad": get_opt("adagrad", n=1, eta=0.25),
-                "RMSprop": get_opt("rmsprop", n=1, eta=0.05),
-                "AdaDelta": get_opt("adadelta", n=1, rho=0.9999),
-                "Adam": get_opt("adam", n=1, alpha=0.25),
-                "RMSpropGraves": get_opt("rmspropgraves", n=1, eta=0.0125),
-                "SMORMS3": get_opt("smorms3", n=1, eta=0.05),
-                "AdaMax": get_opt("adamax", n=1, alpha=0.5),
-                "Nadam": get_opt("nadam", n=1, alpha=0.5),
-                "Eve": get_opt("eve", n=1, f_star=exact_y, alpha=0.25),
-                "SantaE": get_opt("santae", n=1, burnin=epoch/2**4, N=1,
-                                  eta=0.0125),
-                "SantaSSS": get_opt("santasss", n=1, burnin=epoch/2**4, N=1,
-                                    eta=0.125),
-                "AMSGrad": get_opt("amsgrad", n=1, alpha=0.125),
-                "AdaBound": get_opt("adabound", n=1, alpha=0.125),
-                "AMSBound": get_opt("amsbound", n=1, alpha=0.125),
-                "AdaBelief": get_opt("adabelief", n=1, alpha=0.25),
-                "SAM": get_opt("sam", n=1, parent=objective,
-                               opt_dict={"n": 1, "alpha": 0.25})
-                }
+    opt_dict = {
+            "SGD": SGD(),
+            "MSGD": MSGD(),
+            "NAG": NAG(),
+            "AdaGrad": AdaGrad(eta=5e-2),
+            "RMSprop": RMSprop(),
+            "AdaDelta": AdaDelta(rho=0.999),
+            "Adam": Adam(alpha=5e-2),
+            "RMSpropGraves": RMSpropGraves(eta=5e-3),
+            "SMORMS3": SMORMS3(eta=1e-2),
+            "AdaMax": AdaMax(alpha=1e-2),
+            "Nadam": Nadam(alpha=1e-2),
+            "Eve": Eve(f_star=exact_y, alpha=5e-2),
+            "SantaE": SantaE(n=1),
+            "SantaSSS": SantaSSS(n=1),
+            "AMSGrad": AMSGrad(alpha=5e-2),
+            "AdaBound": AdaBound(alpha=5e-2),
+            "AMSBound": AMSBound(alpha=5e-2),
+            "AdaBelief": AdaBelief(),
+            "SAM": SAM(),
+    }
     key_len = len(max(opt_dict.keys(), key=len))
+    sam_opt = SGD()
+    sam_opt.build()
 
-    current_x = np.full(len(opt_dict), start_x)
-    current_y = np.full(len(opt_dict), start_y)
+    current_x = np.full(len(opt_dict), start_x).reshape(-1, 1)
+    current_y = np.full(len(opt_dict), start_y).reshape(-1, 1)
     err_list = [[] for i in range(len(opt_dict))]
     semi_err_list = [[] for i in range(len(opt_dict))]
 
@@ -107,7 +120,7 @@ def opt_plot():
     ax[1].set_yscale("log")
     ax[1].grid()
     ax[1].set_xlim([0, epoch])
-    ax[1].set_ylim([1e-16, 25])
+    #ax[1].set_ylim([1e-16, 25])
 
     ax[2].set_title("error from semi-minimum")
     ax[2].set_position([0.075, 0.05, 0.75, 0.2])
@@ -116,10 +129,12 @@ def opt_plot():
     ax[2].set_yscale("log")
     ax[2].grid()
     ax[2].set_xlim([0, epoch])
-    ax[2].set_ylim([1e-16, 25])
+    #ax[2].set_ylim([1e-16, 25])
 
     base = ax[0].plot(x_range, y_range, color="b")
 
+    for opt in opt_dict.values():
+        opt.build(shape=(1,), seed=seed, opt=sam_opt)
     images = []
     for i in range(1, epoch+1):
         imgs = []
@@ -142,12 +157,12 @@ def opt_plot():
                              semi_err_img, semi_err_point])
 
             objective.params = current_x[j]
-            dw = opt_dict[opt].update(objective.backward(current_x[j]),
-                                      current_x[j],
+            dw = opt_dict[opt].update(grad=objective.backward(x=current_x[j]),
+                                      parent=objective,
                                       t=i, f=current_y[j])
             current_x[j] += dw
             objective.params = current_x[j]
-            current_y[j] = objective.forward(current_x[j])
+            current_y[j] = objective.forward(x=current_x[j])
         if imgs:
             images.append(base+imgs)
     imgs = []

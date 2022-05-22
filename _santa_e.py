@@ -1,52 +1,90 @@
-from enum import IntEnum, auto
-from typing import Callable
-from dataclasses import dataclass, InitVar, field
-
 import numpy as np
-from numpy import ndarray
 
-try:
-    from ._base import BaseOpt
-except ImportError:
-    # For doctest
-    from main.dl.opt import BaseOpt
+from _base import BaseOpt
 
 
-class _keys(IntEnum):
-    alpha = 0
-    u = auto()
-    v = auto()
-    g = auto()
-
-
-@dataclass
 class SantaE(BaseOpt):
     """SantaE optimizer class.
+
+    Attributes:
+        eta (Callable): Learning rate.
+                        If float comming, make lambda function
+                        which return the value.
+        sigma (Callable): Square momentum oblivion rate.
+                          If float comming, make lambda function
+                          which return the value.
+        anne_func (Callable): Annealing function.
+                              This must be to be infinity
+                              when timestep goes to infinity.
+                              Arguments:
+                                t (int): Timestep
+                                rate (float): Annealing rate.
+                                coef (float): Annealing coef.
+                                bias (float): Annealing bias.
+        anne_rate (Callable): Annealing rate.
+                              If float comming, make lambda function
+                              which return the value.
+        anne_coef (Callable): Annealing coefficient.
+                              If float comming, make lambda function
+                              which return the value.
+        anne_bias (Callable): Annealing bias.
+                              If float comming, make lambda function
+                              which return the value.
+        burnin (int): Timestep to finish annealing.
+        n (Callable): Square momentum relaxation term
+                      which is usually the size of (mini)batch.
+                      If int commint, make lambda function
+                      which return the value.
 
     Examples:
     >>> import numpy as np
     >>> obj = SantaE()
-    >>> print(obj)
-    SantaE(eta=0.01, sigma=0.95, anne_rate=0.5, burnin=100, C=5, N=16)
+    >>> obj.update(grad=np.array([-0.5, 1])) # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    RuntimeError: <<Error sentence>>
+    >>> obj.build(seed=42, shape=(2,))
+    >>> obj.update(grad=np.array([-0.5, 1]))
+    array([ 3.42541553, -6.89286411])
+    >>> obj = SantaE(eta=lambda t=1: 1e-3 * 0.5**(t-1),
+    ...              sigma=lambda t=1: 0.95 if t <= 5 else 0.55)
+    >>> obj.build(seed=42, shape=(2,))
+    >>> for i in range(1, 11):
+    ...     print(f"t={i:2d}", obj.update(grad=np.array([-0.5, 1]), t=i))
+    t= 1 [ 0.99147181 -2.03731685]
+    t= 2 [ 0.5013121  -1.50708504]
+    t= 3 [ 1.17381997 -0.7985691 ]
+    t= 4 [ 0.76579974 -0.45303151]
+    t= 5 [ 0.50862164 -0.36247924]
+    t= 6 [ 0.34777751 -0.31314123]
+    t= 7 [ 0.16876258 -0.22545444]
+    t= 8 [ 0.09694362 -0.14863476]
+    t= 9 [ 0.05613697 -0.1225012 ]
+    t=10 [ 0.06700753 -0.08796394]
     """
-    kind: InitVar[int] = 4
-    eta: float = 1e-2
-    sigma:float = 0.95
-    #lambda_: float = 1e-8
-    anne_func: Callable = field(default=lambda t, rate: t**rate, repr=False)
-    anne_rate: float = 0.5
-    burnin: int = 100
-    C: int = 5
-    N: int = 16
 
-    def __post_init__(self, *args, **kwds):
-        super().__post_init__(*args, **kwds)
-        self.previous[_keys.alpha] = np.sqrt(self.eta)*self.C
-        self.previous[_keys.u] \
-                = (np.sqrt(self.eta)
-                   *np.random.randn(*self.previous[_keys.u].shape))
+    def __init__(self, *,
+                 eta=1e-2, sigma=0.95,
+                 anne_func=lambda t, rate, coef, bias: coef * t**rate + bias,
+                 anne_rate=0.5, anne_coef=1., anne_bias=0.,
+                 burnin=100, n=16, **kwds):
+        annefuncparam = self._get_func_param(anne_func)
+        if "t" not in annefuncparam and "rate" not in annefuncparam \
+                and "coef" not in annefuncparam and "bias" not in annefuncparam:
+            raise ValueError("'anne_func' must have parameters;\n"
+                             "'t', 'rate', 'coef', 'bias'.")
 
-    def update(self, grad, *args, t=1, **kwds):
+        super().__init__(**kwds)
+        self._set_param2callable("eta", eta)
+        self._set_param2callable("sigma", sigma)
+        self._set_param2callable("anne_rate", anne_rate)
+        self._set_param2callable("anne_coef", anne_coef)
+        self._set_param2callable("anne_bias", anne_bias)
+        self._set_param2callable("n", n)
+        self.anne_func = anne_func
+        self.burnin = burnin
+
+    def __update(self, *, grad=None, t=1, **kwds):
         """Update calculation.
 
         Args:
@@ -56,53 +94,58 @@ class SantaE(BaseOpt):
         Returns:
             delta (ndarray): Update delta.
         """
-        self._v += (1-self.sigma)*(grad * grad / self.N**2 - self._v)
-        #g_t = 1/np.sqrt(self.lambda_+np.sqrt(self._v))
-        g_t = 1/np.sqrt(np.sqrt(self._v))
-        eta_div_beta = self.eta/self.anne_func(t, self.anne_rate)
+        kwds["t"] = t
+        etakwds = self._get_func_kwds(self.eta, kwds)
+        sigmakwds = self._get_func_kwds(self.sigma, kwds)
+        anneratekwds = self._get_func_kwds(self.anne_rate, kwds)
+        annecoefkwds = self._get_func_kwds(self.anne_coef, kwds)
+        annebiaskwds = self._get_func_kwds(self.anne_bias, kwds)
+        nkwds = self._get_func_kwds(self.n, kwds)
+        eta_t = self.eta(**etakwds)
+        sigma_t = self.sigma(**sigmakwds)
+        annerate_t = self.anne_rate(**anneratekwds)
+        annecoef_t = self.anne_coef(**annecoefkwds)
+        annebias_t = self.anne_bias(**annebiaskwds)
+        beta_t = self.anne_func(t, annerate_t, annecoef_t, annebias_t)
+        n_t = self.n(**nkwds)
+
+        v_t = self._v + (1-sigma_t)*(grad * grad / n_t**2 - self._v)
+        g_t = 1 / v_t**0.25
+        eta_div_beta = eta_t/beta_t
         if t < self.burnin:
-            self._alpha += self._u*self._u - eta_div_beta
+            alpha_t = self._alpha + self._u*self._u - eta_div_beta
             u_t = eta_div_beta*(1 - self._g/g_t)/self._u
-            u_t += (np.sqrt(2*eta_div_beta*self._g)
-                    *np.random.randn(*self._u.shape))
+            u_t += np.sqrt(2*eta_div_beta*self._g) \
+                 * np.random.randn(*self._u.shape)
         else:
             u_t = 0
+            alpha_t = self._alpha
+        u_t += (1-alpha_t)*self._u - eta_t*g_t*grad
+        delta = g_t*u_t
+
+        # Update timestep of t-1 and t.
+        self._alpha = alpha_t
+        self._v = v_t
         self._g = g_t
-        self._u += u_t - self._alpha*self._u - self.eta*self._g*grad
-        delta = self._g*self._u
+        self._u = u_t
         return delta
 
-    @property
-    def _alpha(self):
-        return self.previous[_keys.alpha]
+    def build(self, *,
+              c=5, seed=None, shape=None,
+              _v=1e-8, _g=1e-8, **kwds):
+        """Build optimizer."""
+        if shape is None:
+            raise ValueError("'SantaE' require 'shape'.")
 
-    @_alpha.setter
-    def _alpha(self, value):
-        self.previous[_keys.alpha] = value
-
-    @property
-    def _u(self):
-        return self.previous[_keys.u]
-
-    @_u.setter
-    def _u(self, value):
-        self.previous[_keys.u] = value
-
-    @property
-    def _v(self):
-        return self.previous[_keys.v]
-
-    @_v.setter
-    def _v(self, value):
-        self.previous[_keys.v] = value
-
-    @property
-    def _g(self):
-        return self.previous[_keys.g]
-
-    @_g.setter
-    def _g(self, value):
-        self.previous[_keys.g] = value
+        np.random.seed(seed)
+        etakwds = self._get_func_kwds(self.eta, kwds)
+        eta_0 = self.eta(**etakwds)
+        self._alpha = eta_0**0.5 * c
+        self._u = eta_0**0.5 * np.random.randn(*shape)
+        self._v = _v
+        self._g = _g
+        self.update = self.__update
+        self._is_built = True
 
 
 if __name__ == "__main__":
